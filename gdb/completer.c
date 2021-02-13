@@ -1622,6 +1622,8 @@ completion_tracker::discard_completions ()
 					   entry_hash_func, entry_eq_func,
 					   completion_hash_entry::deleter,
 					   xcalloc, xfree));
+
+  m_from_readline = false;
 }
 
 /* See completer.h.  */
@@ -2006,6 +2008,7 @@ gdb_completion_word_break_characters_throw ()
      start afresh.  */
   delete current_completion.tracker;
   current_completion.tracker = new completion_tracker ();
+  current_completion.tracker->set_from_readline (true);
 
   completion_tracker &tracker = *current_completion.tracker;
 

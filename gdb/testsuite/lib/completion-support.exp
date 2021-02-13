@@ -50,7 +50,6 @@ proc make_tab_completion_list_re { completion_list } {
 	append completion_list_re [string_to_regexp $c]
 	append completion_list_re $ws
     }
-    append completion_list_re $ws
 
     return $completion_list_re
 }

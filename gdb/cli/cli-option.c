@@ -24,6 +24,8 @@
 #include "cli/cli-setshow.h"
 #include "command.h"
 #include <vector>
+#include <readline/readline.h>
+
 
 namespace gdb {
 namespace option {
@@ -46,6 +48,9 @@ union option_value
 
   /* For var_string options.  This is malloc-allocated.  */
   char *string;
+
+  /* For var_filename option. This is malloc-allocated.  */
+  char *filename;
 };
 
 /* Holds an options definition and its value.  */
@@ -88,6 +93,8 @@ struct option_def_and_value
       {
 	if (option.type == var_string)
 	  xfree (value->string);
+	if (option.type == var_filename)
+	  xfree (value->filename);
       }
   }
 
@@ -105,6 +112,8 @@ private:
       {
 	if (option.type == var_string)
 	  value->string = nullptr;
+	if (option.type == var_filename)
+	  value->filename = nullptr;
       }
   }
 };
@@ -163,6 +172,197 @@ complete_on_options (gdb::array_view<const option_def_group> options_group,
 	    (make_completion_match_str (opt.name, text, word));
 	}
 }
+
+namespace filename {
+
+/* Quote the filename whose name is given by TEXT using quoting char
+   QUOTECHAR. QUOTECHAR can be '\'', '"' or '\0'.
+
+   This function is meant to be used with a completion context, so the
+   closing quote is not appended (we might still be waiting for the user
+   to input more path components).  */
+
+static std::string
+quote_filename (const char *text, char quotechar)
+{
+  std::string quoted;
+  /* strlen (text) is a good first approximation of the resulting string
+     length.  */
+  quoted.reserve (strlen (text));
+
+  if (quotechar != '\0')
+    {
+      quoted.push_back (quotechar);
+      while (*text != '\0')
+	{
+	  if (*text == quotechar)
+	    quoted.push_back ('\\');
+	  quoted.push_back (*text++);
+	}
+    }
+  else
+    {
+      while (*text != '\0')
+	{
+	  /* Escape the space and quote chars.  */
+	  if (*text == ' ' || *text == '\'' || *text == '"')
+	    quoted.push_back ('\\');
+	  quoted.push_back (*text++);
+	}
+    }
+
+  return quoted;
+}
+
+/* Add the filename COMPLETION to TRACKER.  COMPLETION will be quoted
+   using QUOTECHAR, but the closing quote will be dismissed if we expect
+   more input from the user.
+
+   ONLY_COMPLETION is set to true to indicate that this function is called only
+   once (i.e. only one possible completion).  In this case, if COMPLETION is not
+   a directory, the closing quote is appended followed by a space to indicate
+   that the next option is expected.
+
+   See completer_ftype for a description of TEXT and WORD.
+
+   The following table gives examples of how COMPLETION might be passed to
+   TRACKER depending on QUOTECHAR
+
+    COMPLETION		QUOTECHAR   As registered in TRACKER
+    "/home"		'\''	    "'/home/'"
+    "/home"		'\0'	    "/home/"
+    "/home"		'"'	    "\"/home/"
+    "~/some folder"	'\''	    "'~/some folder/"
+    "~/some folder"	'\0'	    "~/some\\ folder/"
+    "~/some folder"	'"'	    "\"~/some folder/"
+    "only_compl"	'\''	    "'only_compl' "
+    "only_compl"	'\0'	    "only_compl "
+    "only_compl"	'"'	    "\"only_compl\" "
+   */
+
+static void
+handle_completion
+  (completion_tracker &tracker, std::string completion,
+   const char quotechar, bool only_completion,
+   const char *text, const char *word)
+{
+  gdb_assert (tracker.suppress_append_ws ());
+  struct stat finfo;
+  const bool isdir
+    = stat (completion.c_str (), &finfo) == 0 && S_ISDIR (finfo.st_mode);
+
+  /* Readline would add a '/' for dirs, so do is ourselves if readline is not
+     here.  */
+  if (isdir && !tracker.from_readline ())
+    completion.push_back ('/');
+
+  std::string quoted_completion = quote_filename
+    (completion.c_str (), quotechar);
+
+  /* If we only have 1 possible completion which is not a dir, then we
+     know the user will not add anything else.  We can close the quotation
+     (if any) and append a space (tracker.suppress_append_ws () is true).  */
+  if (only_completion && !isdir)
+    {
+      if (quotechar != '\0')
+        quoted_completion.push_back (quotechar);
+      quoted_completion.push_back (' ');
+    }
+
+  /* Check if we got here by the user typing
+     'complete [...] -filename ...' or '[...] -filename ...\t'
+
+     In the first case, we want the completion to show a actually
+     quotted string, while in the latter case we want to complete on
+     the quoted filename while showing the unquoted completion to the
+     user.  */
+  if (tracker.from_readline ())
+    {
+      completion_match_for_lcd match_for_lcd;
+      match_for_lcd.set_match (quoted_completion.c_str ());
+
+      tracker.add_completion
+        (std::move (gdb::unique_xmalloc_ptr<char>
+                    (xstrdup (completion.c_str ()))), &match_for_lcd,
+         text, word);
+    }
+  else
+    tracker.add_completion
+      (std::move (gdb::unique_xmalloc_ptr<char>
+		  (xstrdup (quoted_completion.c_str ()))),
+       nullptr, text, word);
+
+}
+
+/* Filename completer.  See completer_ftype for description of parameters.  */
+
+static void
+complete_filename
+  (completion_tracker &tracker, const char *text, const char *word)
+{
+  /* First call to rl_filename_completion_function should be 0, subsequent
+     calls non 0.
+
+     We also track the number of calls done to rl_filename_completion_function.
+     If it only return only one non null value a different processing should be
+     done (see handle_completion for details).  */
+  int call_count = 0;
+  std::string first_completion;
+
+  /* The logic that tells if a space is to be appended after a completion is
+     done in handle_completion, not delegated to the tracker.  */
+  tracker.set_suppress_append_ws (true);
+
+  /* Keep track of what quoting mechanism the user used so we can re-quote
+     completions accordingly.  */
+  char quotechar;
+  if (text[0] == '\'' || text[0] == '"')
+    quotechar = text[0];
+  else
+    quotechar = '\0';
+
+  const char *arg_start = text;
+  const std::string dequoted = extract_string_maybe_quoted (&arg_start);
+
+  try
+    {
+      while (true)
+	{
+	  gdb::unique_xmalloc_ptr<char> next_completion
+	    (rl_filename_completion_function
+	     (dequoted.c_str (), call_count++));
+
+	  if (next_completion == nullptr)
+	    break;
+
+	  if (call_count == 1)
+	    first_completion = next_completion.get ();
+	  else
+	    {
+	      if (call_count == 2)
+		handle_completion
+		  (tracker, first_completion, quotechar, false, text,
+		   word);
+
+	      handle_completion
+		(tracker, next_completion.get (), quotechar, false, text,
+		 word);
+	    }
+	}
+
+      /* If there was just 1 completion found, do readline job.  */
+      if (call_count == 2)
+	handle_completion
+	  (tracker, first_completion, quotechar, true, text, word);
+    }
+  catch (const gdb_exception_error &except)
+    {
+      if (except.error != MAX_COMPLETIONS_REACHED_ERROR)
+        throw;
+    }
+}
+
+} /* namespace filename */
 
 /* See cli-option.h.  */
 
@@ -443,6 +643,40 @@ parse_option (gdb::array_view<const option_def_group> options_group,
 	return option_def_and_value {*match, match_ctx, val};
       }
 
+    case var_filename:
+      {
+	if (check_for_argument (args, "--"))
+	  {
+	    /* Treat "maint test-options -filename --" as if there
+	       was no argument after "-filename".  */
+	    error (_("-%s requires an argument"), match->name);
+	  }
+
+	/* We are actually parsing the input, so advance the pointer to
+	   after what have been parsed.  */
+        const char *arg_start = *args;
+	const std::string fname = extract_string_maybe_quoted (args);
+
+        /* If required, perform completion.  */
+	if (completion != nullptr)
+          {
+	    if (**args == '\0')
+              {
+                gdb::option::filename::complete_filename
+                  (completion->tracker, arg_start, arg_start);
+
+                return {};
+              }
+	  }
+
+	if (fname == "")
+	  error (_("-%s requires an argument"), match->name);
+
+	option_value val;
+	val.filename = xstrdup (fname.c_str ());
+	return option_def_and_value {*match, match_ctx, val};
+      }
+
     default:
       /* Not yet.  */
       gdb_assert_not_reached (_("option type not supported"));
@@ -606,6 +840,11 @@ save_option_value_in_ctx (gdb::optional<option_def_and_value> &ov)
 	= ov->value->string;
       ov->value->string = nullptr;
       break;
+    case var_filename:
+      *ov->option.var_address.filename (ov->option, ov->ctx)
+	= ov->value->filename;
+      ov->value->filename = nullptr;
+      break;
     default:
       gdb_assert_not_reached ("unhandled option type");
     }
@@ -680,6 +919,8 @@ get_val_type_str (const option_def &opt, std::string &buffer)
       }
     case var_string:
       return "STRING";
+    case var_filename:
+      return "FILENAME";
     default:
       return nullptr;
     }
@@ -823,6 +1064,15 @@ add_setshow_cmds_for_options (command_class cmd_class,
 				  option.help_doc,
 				  nullptr, option.show_cmd_cb,
 				  set_list, show_list);
+	}
+      else if (option.type == var_filename)
+	{
+	  add_setshow_filename_cmd (option.name, cmd_class,
+				    option.var_address.filename (option, data),
+				    option.set_doc, option.show_doc,
+				    option.help_doc,
+				    nullptr, option.show_cmd_cb,
+				    set_list, show_list);
 	}
       else
 	gdb_assert_not_reached (_("option type not handled"));

@@ -87,6 +87,7 @@ public:
       int *(*integer) (const option_def &, void *ctx);
       const char **(*enumeration) (const option_def &, void *ctx);
       char **(*string) (const option_def &, void *ctx);
+      char **(*filename) (const option_def &, void *ctx);
     }
   var_address;
 
@@ -277,6 +278,25 @@ struct string_option_def : option_def
 		  (erased_get_var_address_ftype *) get_var_address_cb_,
 		  show_cmd_cb_,
 		  set_doc_, show_doc_, help_doc_)
+  {
+    var_address.enumeration = detail::get_var_address<const char *, Context>;
+  }
+};
+
+/* A var_filename command line option.  */
+
+template <typename Context>
+struct filename_option_def : option_def
+{
+  filename_option_def (const char *long_option_,
+		       char **(*get_var_address_cb_) (Context *),
+		       show_value_ftype *show_cmd_cb_,
+		       const char *set_doc_,
+		       const char *show_doc_ = nullptr,
+		       const char *help_doc_ = nullptr)
+    : option_def (long_option_, var_filename,
+		  (erased_get_var_address_ftype *) get_var_address_cb_,
+		  show_cmd_cb_, set_doc_, show_doc_, help_doc_)
   {
     var_address.enumeration = detail::get_var_address<const char *, Context>;
   }

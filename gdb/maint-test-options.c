@@ -134,6 +134,7 @@ struct test_options_opts
   unsigned int uint_opt = 0;
   int zuint_unl_opt = 0;
   char *string_opt = nullptr;
+  char *filename_opt = nullptr;
 
   test_options_opts () = default;
 
@@ -150,7 +151,8 @@ struct test_options_opts
   {
     fprintf_unfiltered (file,
 			_("-flag %d -xx1 %d -xx2 %d -bool %d "
-			  "-enum %s -uint %s -zuint-unl %s -string '%s' -- %s\n"),
+			  "-enum %s -uint %s -zuint-unl %s -string '%s' "
+			  "-filename '%s' -- %s\n"),
 			flag_opt,
 			xx1_opt,
 			xx2_opt,
@@ -164,6 +166,9 @@ struct test_options_opts
 			 : plongest (zuint_unl_opt)),
 			(string_opt != nullptr
 			 ? string_opt
+			 : ""),
+			(filename_opt != nullptr
+			 ? filename_opt
 			 : ""),
 			args);
   }
@@ -236,6 +241,14 @@ static const gdb::option::option_def test_options_option_defs[] = {
     [] (test_options_opts *opts) { return &opts->string_opt; },
     nullptr, /* show_cmd_cb */
     N_("A string option."),
+  },
+
+  /* A filename option.  */
+  gdb::option::filename_option_def<test_options_opts> {
+    "filename",
+    [] (test_options_opts *opts) { return &opts->filename_opt; },
+    nullptr, /* show_cmd_cb */
+    N_("A filename option."),
   },
 };
 

@@ -95,19 +95,19 @@ proc make_cmd {variant} {
 # test-options xxx", with no flag/option set.  OPERAND is the expected
 # operand.
 proc expect_none {operand} {
-    return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '' -- $operand"
+    return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '' -filename '' -- $operand"
 }
 
 # Return a string for the expected result of running "maint
 # test-options xxx", with -flag set.  OPERAND is the expected operand.
 proc expect_flag {operand} {
-    return "-flag 1 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '' -- $operand"
+    return "-flag 1 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '' -filename '' -- $operand"
 }
 
 # Return a string for the expected result of running "maint
 # test-options xxx", with -bool set.  OPERAND is the expected operand.
 proc expect_bool {operand} {
-    return "-flag 0 -xx1 0 -xx2 0 -bool 1 -enum xxx -uint 0 -zuint-unl 0 -string '' -- $operand"
+    return "-flag 0 -xx1 0 -xx2 0 -bool 1 -enum xxx -uint 0 -zuint-unl 0 -string '' -filename '' -- $operand"
 }
 
 # Return a string for the expected result of running "maint
@@ -116,11 +116,23 @@ proc expect_bool {operand} {
 # expected operand.
 proc expect_integer {option val operand} {
     if {$option == "uinteger"} {
-	return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint $val -zuint-unl 0 -string '' -- $operand"
+	return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint $val -zuint-unl 0 -string '' -filename '' -- $operand"
     } elseif {$option == "zuinteger-unlimited"} {
-	return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl $val -string '' -- $operand"
+	return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl $val -string '' -filename '' -- $operand"
     } else {
 	error "unsupported option: $option"
+    }
+}
+
+# Helper function used to dequote string litterals in expected output.
+proc dequote_expected_string {str} {
+    if { ( [string range $str 0 0] == "\""
+	   && [string range $str end end] == "\"")
+	 || ([string range $str 0 0] == "'"
+	     && [string range $str end end] == "'")} {
+	return [string range $str 1 end-1]
+    } else {
+	return $str
     }
 }
 
@@ -128,19 +140,22 @@ proc expect_integer {option val operand} {
 # test-options xxx", with -string set to $STR.  OPERAND is the
 # expected operand.
 proc expect_string {str operand} {
-    # Dequote the string in the expected output.
-    if { ( [string range $str 0 0] == "\""
-	   && [string range $str end end] == "\"")
-	 || ([string range $str 0 0] == "'"
-	     && [string range $str end end] == "'")} {
-	set str [string range $str 1 end-1]
-    }
-    return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '$str' -- $operand"
+    set str [dequote_expected_string $str]
+    return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '$str' -filename '' -- $operand"
+}
+
+# Return a string for the expected result of running "maint
+# test-options xxx", with -filename set to $FILENAME.  OPERAND is the
+# expected operand.
+proc expect_filename {filename operand} {
+    set filename [dequote_expected_string $filename]
+    return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '' -filename '$filename' -- $operand"
 }
 
 set all_options {
     "-bool"
     "-enum"
+    "-filename"
     "-flag"
     "-string"
     "-uinteger"
@@ -594,7 +609,7 @@ proc_with_prefix test-flag {variant} {
 
     # Extract twice the same flag, separated by one space.
     gdb_test "$cmd -xx1     -xx2 -xx1  -xx2 -xx1    -- non flags args" \
-	"-flag 0 -xx1 1 -xx2 1 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '' -- non flags args"
+	"-flag 0 -xx1 1 -xx2 1 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '' -filename '' -- non flags args"
 
     # Extract 2 known flags in front of unknown flags.
     gdb_test "$cmd -xx1 -xx2 -a -b -c -xx1 --" \
@@ -1013,6 +1028,90 @@ proc_with_prefix test-string {variant} {
     }
 }
 
+# filename option tests.
+proc_with_prefix test-filename {variant} {
+    global all_options
+    set tmpdir [standard_output_file ""]
+
+    set cmd [make_cmd $variant]
+
+    gdb_test "$cmd -filename --"\
+	"-filename requires an argument"
+    if {$variant == "require-delimiter"} {
+	gdb_test "$cmd -filename" [expect_none "-filename"]
+    } else {
+	gdb_test "$cmd -filename"\
+	    "-filename requires an argument"
+    }
+
+    # Check that dequoting is happening as expected (similar to string
+    # dequoting).
+    foreach_with_prefix str {
+	"STR"
+	"\"STR\""
+	"\\\"STR"
+	"'STR'"
+	"\\'STR"
+	"\"STR AAA\""
+	"'STR BBB'"
+	"\"STR 'CCC' DDD\""
+	"'STR \"EEE\" FFF'"
+	"\"STR \\\"GGG\\\" HHH\""
+	"'STR \\\'III\\\' JJJ'"
+    } {
+	gdb_test "$cmd -filename ${str} --" [expect_filename "${str}" ""]
+    }
+
+    # Create some tree structure we can use for the test.
+    set bdir "$tmpdir/testfilename"
+    file mkdir "$bdir/b"
+    file mkdir "$bdir/b c"
+    file mkdir "$bdir/b d"
+    file mkdir "$bdir/b c/d"
+    close [open "$bdir/b c/d/e" w]
+
+    # Tab completion for an escaped path.
+    test_gdb_complete_tab_multiple "$cmd -filename $bdir/b" "" {
+        "b/"
+        "b c/"
+        "b d/"
+    }
+    # Checking completions with the COMPLETE command shows escaped filenames.
+    test_gdb_complete_cmd_multiple "$cmd -filename $bdir/b" "" {
+        "/"
+        "\\ c/"
+        "\\ d/"
+    }
+    # When completing on a unique file, append a ' ' at the end.
+    test_gdb_complete_unique \
+        "$cmd -filename $bdir/b\\ c/d/" \
+        "$cmd -filename $bdir/b\\ c/d/e " ""
+
+    # Perform the same sequence with quoted filenames.
+
+    # Tab completion for a quoted path shows raw filenames.
+    test_gdb_complete_tab_multiple "$cmd -filename '$bdir/b" "" {
+        "b/"
+        "b c/"
+        "b d/"
+    }
+    # Using the COMPLETE command shows quoted filenames (without closing
+    # quote).
+    test_gdb_complete_cmd_multiple "$cmd -filename '$bdir/b" "" {
+        " c/" \
+        " d/" \
+        "/"
+    }
+    # When completing on a single option which is a file, append the
+    # closing quote as well as a space.
+    test_gdb_complete_unique \
+        "$cmd -filename '$bdir/b c/d/" \
+        "$cmd -filename '$bdir/b c/d/e' " ""
+
+    # Cleanup.
+    file delete -force "$bdir"
+}
+
 # Run the options framework tests first.
 foreach_with_prefix cmd {
     "require-delimiter"
@@ -1027,6 +1126,7 @@ foreach_with_prefix cmd {
     }
     test-enum $cmd
     test-string $cmd
+    test-filename $cmd
 }
 
 # Run the print integration tests, both as "standalone", and under
