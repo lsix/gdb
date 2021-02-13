@@ -980,3 +980,14 @@ test_gdb_complete_unique "xxx_yyy_" "xxx_yyy_zzz"
 gdb_test_no_output "alias set aaa_bbb_ccc=set debug"
 gdb_test_no_output "maint deprecate set aaa_bbb_ccc"
 test_gdb_complete_unique "set aaa_bbb_" "set aaa_bbb_ccc"
+
+# Test the completer of the add-inferior command.
+gdb_test_no_output "set max-completions unlimited"
+test_gdb_complete_multiple "add-inferior " "-" "" {
+    "-copies"
+    "-exec"
+    "-no-connection"
+}
+test_gdb_complete_unique \
+    "add-inferior -copies 2 -exec some\\ file -n" \
+    "add-inferior -copies 2 -exec some\\ file -no-connection"

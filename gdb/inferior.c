@@ -788,63 +788,110 @@ switch_to_inferior_and_push_target (inferior *new_inf,
     printf_filtered (_("Added inferior %d\n"), new_inf->num);
 }
 
+/* Describes the options for the add-inferior command.  */
+
+struct add_inferior_options
+{
+    /* Number new inferiors to create.  */
+    unsigned int copies = 1;
+
+    /* Instructs to start the inferior with no target connected.  */
+    bool no_connection = false;
+
+    /* Path to the file name of the executable to use as main program.  */
+    char *exec = nullptr;
+
+    ~add_inferior_options ()
+      {
+        if (exec != nullptr)
+          {
+            xfree (exec);
+            exec = nullptr;
+          }
+      }
+};
+
+/* Definition of options for the 'add-inferior' command.  */
+
+static const gdb::option::option_def add_inferior_options_defs[] = {
+  gdb::option::zuinteger_option_def<add_inferior_options> {
+      "copies",
+      [] (add_inferior_options *opt) { return &opt->copies; },
+      nullptr, /* show_cmd_cb */
+      nullptr, /* set_doc */
+      nullptr, /* show_doc */
+      nullptr, /* help_doc */
+  },
+
+  gdb::option::flag_option_def<add_inferior_options> {
+      "no-connection",
+      [] (add_inferior_options *opt) { return &opt->no_connection; },
+      nullptr, /* set_doc */
+      nullptr, /* help_doc */
+  },
+
+  gdb::option::filename_option_def<add_inferior_options> {
+      "exec",
+      [] (add_inferior_options *opt) { return &opt->exec; },
+      nullptr, /* show_cmd_cb */
+      nullptr, /* set_doc */
+      nullptr, /* show_doc */
+      nullptr, /* help_doc */
+  },
+
+};
+
+static gdb::option::option_def_group
+make_add_inferior_options_def_group (struct add_inferior_options *opts)
+{
+  return {{add_inferior_options_defs}, opts};
+}
+
+/* Completer for the add-inferior command.  */
+
+static void
+add_inferior_completer (struct cmd_list_element *cmd,
+			completion_tracker &tracker,
+			const char *text, const char * /*word*/)
+{
+  const auto group = make_add_inferior_options_def_group (nullptr);
+  if (gdb::option::complete_options
+      (tracker, &text, gdb::option::PROCESS_OPTIONS_UNKNOWN_IS_OPERAND, group))
+    return;
+}
+
 /* add-inferior [-copies N] [-exec FILENAME] [-no-connection] */
 
 static void
 add_inferior_command (const char *args, int from_tty)
 {
-  int i, copies = 1;
+  int i;
   gdb::unique_xmalloc_ptr<char> exec;
   symfile_add_flags add_flags = 0;
-  bool no_connection = false;
+
+  add_inferior_options opts;
+  const gdb::option::option_def_group group
+    = make_add_inferior_options_def_group (&opts);
+  gdb::option::process_options
+    (&args, gdb::option::PROCESS_OPTIONS_UNKNOWN_IS_ERROR, group);
 
   if (from_tty)
     add_flags |= SYMFILE_VERBOSE;
-
-  if (args)
-    {
-      gdb_argv built_argv (args);
-
-      for (char **argv = built_argv.get (); *argv != NULL; argv++)
-	{
-	  if (**argv == '-')
-	    {
-	      if (strcmp (*argv, "-copies") == 0)
-		{
-		  ++argv;
-		  if (!*argv)
-		    error (_("No argument to -copies"));
-		  copies = parse_and_eval_long (*argv);
-		}
-	      else if (strcmp (*argv, "-no-connection") == 0)
-		no_connection = true;
-	      else if (strcmp (*argv, "-exec") == 0)
-		{
-		  ++argv;
-		  if (!*argv)
-		    error (_("No argument to -exec"));
-		  exec.reset (tilde_expand (*argv));
-		}
-	    }
-	  else
-	    error (_("Invalid argument"));
-	}
-    }
 
   inferior *orginf = current_inferior ();
 
   scoped_restore_current_pspace_and_thread restore_pspace_thread;
 
-  for (i = 0; i < copies; ++i)
+  for (i = 0; i < opts.copies; ++i)
     {
       inferior *inf = add_inferior_with_spaces ();
 
-      switch_to_inferior_and_push_target (inf, no_connection, orginf);
+      switch_to_inferior_and_push_target (inf, opts.no_connection, orginf);
 
-      if (exec != NULL)
+      if (opts.filename != nullptr)
 	{
-	  exec_file_attach (exec.get (), from_tty);
-	  symbol_file_add_main (exec.get (), add_flags);
+	  exec_file_attach (opts.filename, from_tty);
+	  symbol_file_add_main (opts.filename, add_flags);
 	}
     }
 }
@@ -997,7 +1044,7 @@ as main program.\n\
 By default, the new inferior inherits the current inferior's connection.\n\
 If -no-connection is specified, the new inferior begins with\n\
 no target connection yet."));
-  set_cmd_completer (c, filename_completer);
+  set_cmd_completer_handle_brkchars (c, add_inferior_completer);
 
   add_com ("remove-inferiors", no_class, remove_inferior_command, _("\
 Remove inferior ID (or list of IDs).\n\
