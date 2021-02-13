@@ -95,19 +95,19 @@ proc make_cmd {variant} {
 # test-options xxx", with no flag/option set.  OPERAND is the expected
 # operand.
 proc expect_none {operand} {
-    return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '' -filename '' -- $operand"
+    return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint 0 -zuint-unl 0 -string '' -filename '' -- $operand"
 }
 
 # Return a string for the expected result of running "maint
 # test-options xxx", with -flag set.  OPERAND is the expected operand.
 proc expect_flag {operand} {
-    return "-flag 1 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '' -filename '' -- $operand"
+    return "-flag 1 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint 0 -zuint-unl 0 -string '' -filename '' -- $operand"
 }
 
 # Return a string for the expected result of running "maint
 # test-options xxx", with -bool set.  OPERAND is the expected operand.
 proc expect_bool {operand} {
-    return "-flag 0 -xx1 0 -xx2 0 -bool 1 -enum xxx -uint 0 -zuint-unl 0 -string '' -filename '' -- $operand"
+    return "-flag 0 -xx1 0 -xx2 0 -bool 1 -enum xxx -uint 0 -zuint 0 -zuint-unl 0 -string '' -filename '' -- $operand"
 }
 
 # Return a string for the expected result of running "maint
@@ -116,9 +116,11 @@ proc expect_bool {operand} {
 # expected operand.
 proc expect_integer {option val operand} {
     if {$option == "uinteger"} {
-	return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint $val -zuint-unl 0 -string '' -filename '' -- $operand"
+	return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint $val -zuint 0 -zuint-unl 0 -string '' -filename '' -- $operand"
+    } elseif {$option == "zuinteger"} {
+	return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint $val -zuint-unl 0 -string '' -filename '' -- $operand"
     } elseif {$option == "zuinteger-unlimited"} {
-	return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl $val -string '' -filename '' -- $operand"
+	return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint 0 -zuint-unl $val -string '' -filename '' -- $operand"
     } else {
 	error "unsupported option: $option"
     }
@@ -141,7 +143,7 @@ proc dequote_expected_string {str} {
 # expected operand.
 proc expect_string {str operand} {
     set str [dequote_expected_string $str]
-    return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '$str' -filename '' -- $operand"
+    return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint 0 -zuint-unl 0 -string '$str' -filename '' -- $operand"
 }
 
 # Return a string for the expected result of running "maint
@@ -149,7 +151,7 @@ proc expect_string {str operand} {
 # expected operand.
 proc expect_filename {filename operand} {
     set filename [dequote_expected_string $filename]
-    return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '' -filename '$filename' -- $operand"
+    return "-flag 0 -xx1 0 -xx2 0 -bool 0 -enum xxx -uint 0 -zuint 0 -zuint-unl 0 -string '' -filename '$filename' -- $operand"
 }
 
 set all_options {
@@ -161,6 +163,7 @@ set all_options {
     "-uinteger"
     "-xx1"
     "-xx2"
+    "-zuinteger"
     "-zuinteger-unlimited"
 }
 
@@ -609,7 +612,7 @@ proc_with_prefix test-flag {variant} {
 
     # Extract twice the same flag, separated by one space.
     gdb_test "$cmd -xx1     -xx2 -xx1  -xx2 -xx1    -- non flags args" \
-	"-flag 0 -xx1 1 -xx2 1 -bool 0 -enum xxx -uint 0 -zuint-unl 0 -string '' -filename '' -- non flags args"
+	"-flag 0 -xx1 1 -xx2 1 -bool 0 -enum xxx -uint 0 -zuint 0 -zuint-unl 0 -string '' -filename '' -- non flags args"
 
     # Extract 2 known flags in front of unknown flags.
     gdb_test "$cmd -xx1 -xx2 -a -b -c -xx1 --" \
@@ -827,39 +830,49 @@ proc_with_prefix test-boolean {variant} {
 }
 
 # Uinteger option tests.  OPTION is which integer option we're
-# testing.  Can be "uinteger" or "zuinteger-unlimited".
+# testing.  Can be "uinteger", "zuinteger" or "zuinteger-unlimited".
 proc_with_prefix test-uinteger {variant option} {
     global all_options
 
     set cmd "[make_cmd $variant] -$option"
 
-    # Test completing a uinteger option:
-    res_test_gdb_complete_multiple \
-	"1 [expect_none ""]" \
-	"$cmd " "" "" {
-	"NUMBER"
-	"unlimited"
+    # zuinteger have no completion. NUMBER is not present since it
+    # would be the only option available and therefore completed on.
+    if {$option != "zuinteger"} {
+
+	# Test completing a uinteger option:
+	res_test_gdb_complete_multiple \
+	    "1 [expect_none ""]" \
+	    "$cmd " "" "" {
+	    "NUMBER"
+	    "unlimited"
+	}
+
+	# NUMBER above is just a placeholder, make sure we don't complete
+	# it as a valid option.
+	res_test_gdb_complete_none \
+	    "1 [expect_none "NU"]" \
+	    "$cmd NU"
+
+	# "unlimited" is valid though.
+	res_test_gdb_complete_unique \
+	    "1 [expect_none "u"]" \
+	    "$cmd u" \
+	    "$cmd unlimited"
     }
-
-    # NUMBER above is just a placeholder, make sure we don't complete
-    # it as a valid option.
-    res_test_gdb_complete_none \
-	"1 [expect_none "NU"]" \
-	"$cmd NU"
-
-    # "unlimited" is valid though.
-    res_test_gdb_complete_unique \
-	"1 [expect_none "u"]" \
-	"$cmd u" \
-	"$cmd unlimited"
 
     # Basic smoke test of accepted / not accepted values.
     gdb_test "$cmd 1 -- 999" [expect_integer $option "1" "999"]
-    gdb_test "$cmd unlimited -- 999" \
-	[expect_integer $option "unlimited" "999"]
+    if {$option != "zuinteger"} {
+        gdb_test "$cmd unlimited -- 999" \
+	    [expect_integer $option "unlimited" "999"]
+    }
     if {$option == "zuinteger-unlimited"} {
 	gdb_test "$cmd -1 --" [expect_integer $option "unlimited" ""]
 	gdb_test "$cmd 0 --" [expect_integer $option "0" ""]
+    } elseif {$option == "zuinteger"} {
+	gdb_test "$cmd 0 --" [expect_integer $option "0" ""]
+	gdb_test "$cmd -1 --" "integer -1 out of range"
     } else {
 	gdb_test "$cmd -1 --" "integer -1 out of range"
 	gdb_test "$cmd 0 --" [expect_integer $option "unlimited" ""]
@@ -870,7 +883,7 @@ proc_with_prefix test-uinteger {variant option} {
 	"Expected integer at: unlimitedx --"
 
     # Don't offer completions until we're past the
-    # -uinteger/-zuinteger-unlimited argument.
+    # -uinteger/-zuinteger/-zuinteger-unlimited argument.
     res_test_gdb_complete_none \
 	"1 [expect_none ""]" \
 	"$cmd 1"
@@ -884,6 +897,13 @@ proc_with_prefix test-uinteger {variant option} {
 
     # Try "-1".
     if {$option == "uinteger"} {
+	# -1 is invalid uinteger.
+	foreach value {"-1" "-1 "} {
+	    res_test_gdb_complete_none \
+		"1 [expect_none ""]" \
+		"$cmd $value"
+	}
+    } elseif {$option == "zuinteger"} {
 	# -1 is invalid uinteger.
 	foreach value {"-1" "-1 "} {
 	    res_test_gdb_complete_none \
@@ -1121,7 +1141,7 @@ foreach_with_prefix cmd {
     test-misc $cmd
     test-flag $cmd
     test-boolean $cmd
-    foreach subcmd {"uinteger" "zuinteger-unlimited" } {
+    foreach subcmd {"uinteger" "zuinteger" "zuinteger-unlimited" } {
 	test-uinteger $cmd $subcmd
     }
     test-enum $cmd

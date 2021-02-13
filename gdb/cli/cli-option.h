@@ -84,6 +84,7 @@ public:
     {
       bool *(*boolean) (const option_def &, void *ctx);
       unsigned int *(*uinteger) (const option_def &, void *ctx);
+      unsigned int *(*zuinteger) (const option_def &, void *ctx);
       int *(*integer) (const option_def &, void *ctx);
       const char **(*enumeration) (const option_def &, void *ctx);
       char **(*string) (const option_def &, void *ctx);
@@ -213,6 +214,26 @@ struct uinteger_option_def : option_def
 		       const char *show_doc_ = nullptr,
 		       const char *help_doc_ = nullptr)
     : option_def (long_option_, var_uinteger,
+		  (erased_get_var_address_ftype *) get_var_address_cb_,
+		  show_cmd_cb_,
+		  set_doc_, show_doc_, help_doc_)
+  {
+    var_address.uinteger = detail::get_var_address<unsigned int, Context>;
+  }
+};
+
+/* A var_zuinteger command line option.  */
+
+template<typename Context>
+struct zuinteger_option_def : option_def
+{
+  zuinteger_option_def (const char *long_option_,
+			unsigned int *(*get_var_address_cb_) (Context *),
+			show_value_ftype *show_cmd_cb_,
+			const char *set_doc_,
+			const char *show_doc_ = nullptr,
+			const char *help_doc_ = nullptr)
+    : option_def (long_option_, var_zuinteger,
 		  (erased_get_var_address_ftype *) get_var_address_cb_,
 		  show_cmd_cb_,
 		  set_doc_, show_doc_, help_doc_)

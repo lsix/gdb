@@ -132,6 +132,7 @@ struct test_options_opts
   bool boolean_opt = false;
   const char *enum_opt = test_options_enum_values_xxx;
   unsigned int uint_opt = 0;
+  unsigned int zuint_opt = 0;
   int zuint_unl_opt = 0;
   char *string_opt = nullptr;
   char *filename_opt = nullptr;
@@ -151,7 +152,7 @@ struct test_options_opts
   {
     fprintf_unfiltered (file,
 			_("-flag %d -xx1 %d -xx2 %d -bool %d "
-			  "-enum %s -uint %s -zuint-unl %s -string '%s' "
+			  "-enum %s -uint %s -zuint %s -zuint-unl %s -string '%s' "
 			  "-filename '%s' -- %s\n"),
 			flag_opt,
 			xx1_opt,
@@ -161,6 +162,7 @@ struct test_options_opts
 			(uint_opt == UINT_MAX
 			 ? "unlimited"
 			 : pulongest (uint_opt)),
+			pulongest (zuint_opt),
 			(zuint_unl_opt == -1
 			 ? "unlimited"
 			 : plongest (zuint_unl_opt)),
@@ -223,6 +225,16 @@ static const gdb::option::option_def test_options_option_defs[] = {
     N_("A uinteger option."),
     nullptr, /* show_doc */
     N_("A help doc that spawns\nmultiple lines."),
+  },
+
+  /* A zuinteger option.  */
+  gdb::option::zuinteger_option_def<test_options_opts> {
+    "zuinteger",
+    [] (test_options_opts *opts) { return &opts->zuint_opt; },
+    nullptr, /* show_cmd_cb */
+    N_("A zuinteger option."),
+    nullptr, /* show_doc */
+    nullptr,
   },
 
   /* A zuinteger_unlimited option.  */

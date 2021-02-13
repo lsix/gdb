@@ -40,6 +40,9 @@ union option_value
   /* For var_uinteger options.  */
   unsigned int uinteger;
 
+  /* For var_zuinteger options.  */
+  unsigned int zuinteger;
+
   /* For var_zuinteger_unlimited options.  */
   int integer;
 
@@ -593,6 +596,15 @@ parse_option (gdb::array_view<const option_def_group> options_group,
 	    return option_def_and_value {*match, match_ctx, val};
 	  }
       }
+    case var_zuinteger:
+      {
+        /* No completion available.  We cannot display NUMBER as a
+	   convinience for the user since there would be only one
+	   option and readline would complete it.  */
+	option_value val;
+	val.zuinteger = parse_cli_var_uinteger (match->type, args, false);
+	return option_def_and_value {*match, match_ctx, val};
+      }
     case var_enum:
       {
 	if (completion != nullptr)
@@ -827,6 +839,10 @@ save_option_value_in_ctx (gdb::optional<option_def_and_value> &ov)
       *ov->option.var_address.uinteger (ov->option, ov->ctx)
 	= ov->value->uinteger;
       break;
+    case var_zuinteger:
+      *ov->option.var_address.zuinteger (ov->option, ov->ctx)
+	= ov->value->zuinteger;
+      break;
     case var_zuinteger_unlimited:
       *ov->option.var_address.integer (ov->option, ov->ctx)
 	= ov->value->integer;
@@ -906,6 +922,8 @@ get_val_type_str (const option_def &opt, std::string &buffer)
     case var_uinteger:
     case var_zuinteger_unlimited:
       return "NUMBER|unlimited";
+    case var_zuinteger:
+      return "NUMBER";
     case var_enum:
       {
 	buffer = "";
@@ -1035,6 +1053,15 @@ add_setshow_cmds_for_options (command_class cmd_class,
 				    option.help_doc,
 				    nullptr, option.show_cmd_cb,
 				    set_list, show_list);
+	}
+      else if (option.type == var_zuinteger)
+	{
+	  add_setshow_zuinteger_cmd (option.name, cmd_class,
+				     option.var_address.zuinteger (option, data),
+				     option.set_doc, option.show_doc,
+				     option.help_doc,
+				     nullptr, option.show_cmd_cb,
+				     set_list, show_list);
 	}
       else if (option.type == var_zuinteger_unlimited)
 	{
